@@ -1,151 +1,53 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
+import os
+import matplotlib.pyplot as plt
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# 데이터 파일 경로
+file_paths = {
+    "Johnstone River - Coquette Point": "./Johnstone_river_coquette_point_joined.csv",
+    "Johnstone River - Innisfail": "./Johnstone_river_innisfail_joined.csv",
+    "Mulgrave River - Deeral": "./Mulgrave_river_deeral_joined.csv",
+    "Pioneer - Dumbleton": "./Pioneer_Dumbleton_joined.csv",
+    "Plane Creek - Sucrogen": "./Plane_ck_sucrogen_joined.csv",
+    "Proserpine River - Glen Isla": "./Proserpine_river_glen_isla_joined.csv",
+    "Russell River - East Russell": "./russell_river_east_russell_joined.csv",
+    "Sandy Creek - Homebush": "./sandy_ck_homebush_joined.csv",
+    "Sandy Creek - Sorbellos Road": "./sandy_ck_sorbellos_road_joined.csv",
+    "Tully River - Euramo": "./Tully_river_euramo_joined.csv"
+}
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+st.set_page_config(page_title="Water Quality Dashboard", layout="wide")
+st.title("🌊 Water Quality Dashboard")
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# 지점 선택
+dataset_name = st.selectbox("Select a monitoring site:", list(file_paths.keys()))
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+# 데이터 불러오기
+df = pd.read_csv(file_paths[dataset_name])
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+# 날짜 컬럼이 있는 경우 datetime 형식으로 변환
+if 'Date' in df.columns:
+    df['Date'] = pd.to_datetime(df['Date'])
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+# 수질 변수 선택 (숫자형만 필터링)
+numeric_cols = df.select_dtypes(include='number').columns.tolist()
+selected_columns = st.multiselect("Select water quality variables to visualize:", numeric_cols, default=numeric_cols[:2])
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+# 데이터 테이블 표시
+st.subheader(f"📋 Data Preview for {dataset_name}")
+st.dataframe(df.head(10))
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+# 시계열 시각화
+if selected_columns and 'Date' in df.columns:
+    st.subheader("📈 Time Series of Selected Variables")
+    for col in selected_columns:
+        fig, ax = plt.subplots()
+        ax.plot(df['Date'], df[col], label=col)
+        ax.set_xlabel("Date")
+        ax.set_ylabel(col)
+        ax.set_title(f"{col} over Time")
+        ax.legend()
+        st.pyplot(fig)
+else:
+    st.info("Please ensure 'Date' column exists and at least one variable is selected.")
